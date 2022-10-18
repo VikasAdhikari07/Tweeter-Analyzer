@@ -1,4 +1,7 @@
 venv
 utils/config.py
+utils/__pycache__/
+__pycache__/
+.idea
 .*
 !/.gitignore
