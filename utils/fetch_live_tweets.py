@@ -1,9 +1,15 @@
 import tweepy
+import logging
 import config
 import settings
 import mysql.connector
 import re
 
+logging.basicConfig(filename="data.log", 
+                    format='%(asctime)s %(message)s',
+                    filemode='w')
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 def clean_tweet(tweet) -> str:
     """
@@ -28,8 +34,6 @@ class MyStreamListener(tweepy.Stream):
         Extract info from tweets
         """
         hashtags = []
-        tweet = ""
-        data = ""
         if status.retweeted:
             # Avoid retweeted info and only original tweets will be reveived
             return True
@@ -37,37 +41,39 @@ class MyStreamListener(tweepy.Stream):
         # Extract hashtags
         if len(status.entities['hashtags']) > 0:
             for i in range(0, len(status.entities['hashtags'])):
-                hashtag = status.entities['hashtags'][i]['text']
                 hashtags.append(status.entities['hashtags'][i]['text'])
-                data += hashtag+","
 
         # Extract Attributes from each tweet
-        if status.truncated is False:
-            tweet = clean_tweet(status.text)
-        else:
-            pass
+        id_str = status.id_str
+        created_at = status.created_at
+        text = clean_tweet(status.text)
         user_created_at = status.user.created_at
-        is_user_verified = str(status.user.verified)
+        # is_user_verified = str(status.user.verified)
         user_location = de_emojify(status.user.location)
         user_description = de_emojify(status.user.description)
-        user_follower_count = status.user.followers_count
-        latitude = None
-        longitude = None
-        tweet_location = str(status.user.location)
+        user_followers_count = status.user.followers_count
+        latitude = "None"
+        longitude = "None"
 
-        if status.coordinates:
+        if status.coordinates is not None:
             longitude = status.coordinates['coordinates'][0]
             latitude = status.coordinates['coordinates'][1]
 
         retweet_count = status.retweet_count
-        favorite_count = status.favorite_count
+        favorite_count = status.favourites_count
 
-        print(tweet)
         print("Long: {}, Lati: {}".format(longitude, latitude))
-
+        val = (id_str, created_at, text, user_created_at, user_location, user_description, user_followers_count, longitude, latitude, retweet_count, favorite_count)
+        logger.info(val)
         # store all data in MySql
         if mydb.is_connected():
             mycursor = mydb.cursor()
+            sql = "INSERT INTO {} (id_str, created_at, text, user_created_at, user_location, user_description, user_followers_count, longitude, latitude, retweet_count, favorite_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)".format(settings.TABLE_NAME)
+            val = (id_str, created_at, text, user_created_at, user_location, user_description, user_followers_count, longitude, latitude, retweet_count, favorite_count)
+            logger.info('Storing data in SQL')
+            mycursor.execute(sql, val)
+            mydb.commit()
+            mycursor.close()
 
     def on_error(self, status_code):
         """
@@ -88,22 +94,26 @@ if __name__ == "__main__":
         user="adi",
         passwd="root",
         database="TwitterDB",
-        #charset="utf-8"
     )
 
     if mydb.is_connected():
         """
         Check if the table exist if not then create a new one
         """
-        mycursor=mydb.cursor()
-        mycursor.execute(f"""
-        SELECT SUM(TABLE_ROWS) 
-        FROM INFORMATION_SCHEMA.TABLES 
-        WHERE TABLE_SCHEMA = '{settings.TABLE_NAME}';
-        """)
-        print(mycursor)
+        crsr = mydb.cursor(buffered=True)
+        crsr.execute("SHOW TABLES")
+        table_present = False
+        for x in crsr:
+            if x[0] == settings.TABLE_NAME[0]:
+                table_present = True
+                logger.info("Table already present")
+                print("TABLE ALREADY PRESENT")
 
-        if mycursor.fetchone()[0] != 1:
-            print("TABLE NOT EXIST")
-        mycursor.close()
-    #stream.filter(languages=["en"], track=settings.TRACK_WORDS)
+        if table_present == False:
+            logger.info('creating a table')
+            print("CREATING A TABLE")
+            crsr.execute("CREATE TABLE programming ({})".format(settings.TABLE_ATTRIBUTES))
+            mydb.commit()
+        crsr.close()
+
+    stream.filter(languages=["en"], track=settings.TRACK_WORDS)
